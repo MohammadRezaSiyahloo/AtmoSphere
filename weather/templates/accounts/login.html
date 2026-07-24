@@ -1,0 +1,25 @@
+{% extends "weather/base.html" %}
+
+{% block title %}Login — AtmoSphere{% endblock %}
+
+{% block content %}
+<div class="auth-card">
+    <h2>Login</h2>
+    <form method="POST">
+        {% csrf_token %}
+        {% for field in form %}
+            <div class="auth-field">
+                {% if field.label %}<label>{{ field.label }}</label>{% endif %}
+                {{ field }}
+                {% if field.errors %}
+                    <div class="field-error">{{ field.errors.0 }}</div>
+                {% endif %}
+            </div>
+        {% endfor %}
+        <button type="submit" class="auth-submit">Login</button>
+    </form>
+    <p class="auth-footer">
+        Don't have an account? <a href="{% url 'register' %}">Register</a>
+    </p>
+</div>
+{% endblock %}

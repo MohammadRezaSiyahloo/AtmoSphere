@@ -1,0 +1,332 @@
+{% extends "weather/base.html" %}
+{% load static %}
+
+{% block content %}
+    <div class="body">
+        {% for city in cities %}
+            {% include "weather/weather-preview.html" %}
+        {% endfor %}
+        <div class="add-city-wrapper">
+        <button class="add-city-btn" onclick="document.getElementById('addModal').style.display='flex'">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            Add Location
+        </button>
+        {% if cities|length > 1 %}
+        <button class="add-city-btn compare-btn" onclick="startCompare()">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect>
+            </svg>
+            Compare Locations
+        </button>
+        {% endif %}
+        </div>
+    </div>
+
+    <!-- Add City Modal -->
+    <div id="addModal" class="modal-overlay" onclick="if(event.target===this)this.style.display='none'">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>Add a Location</h3>
+                <button class="modal-close" onclick="document.getElementById('addModal').style.display='none'">&times;</button>
+            </div>
+            <form class="modal-form" method="POST" action="add/"> {% csrf_token %}
+                {{form}}
+                <button type="submit" class="modal-submit">Add</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Forecast Detail Modal -->
+    <div id="forecastModal" class="modal-overlay" onclick="if(event.target===this)this.style.display='none'">
+        <div class="forecast-modal-card">
+            <button class="modal-close" onclick="document.getElementById('forecastModal').style.display='none'" style="position:absolute;top:12px;right:16px;">&times;</button>
+            <div class="forecast-modal-top">
+                <img id="forecastModalIcon" class="forecast-modal-icon" src="" alt="">
+                <div id="forecastModalDay" class="forecast-modal-day"></div>
+            </div>
+            <div id="forecastModalHourly" class="forecast-modal-hourly"></div>
+            <div id="forecastModalStats" class="forecast-modal-stats"></div>
+        </div>
+    </div>
+
+    <!-- Compare Modal -->
+    <div id="compareModal" class="modal-overlay" onclick="if(event.target===this)this.style.display='none'">
+        <div class="compare-modal-card">
+            <button class="modal-close" onclick="document.getElementById('compareModal').style.display='none'" style="position:absolute;top:12px;right:16px;">&times;</button>
+            <div class="compare-header">
+                <h3>Location Comparison</h3>
+            </div>
+            <div id="compareContent" class="compare-content"></div>
+        </div>
+    </div>
+
+    <div class="footer"></div>
+    <script src="{% static 'weather/autocomplete.js' %}"></script>
+    <script>
+        // Weather background on hover
+        const WEATHER_BACKGROUNDS = {
+            clear: '/static/weather/images/bg/clear.jpg',
+            clouds: '/static/weather/images/bg/clouds.jpg',
+            rain: '/static/weather/images/bg/rain.jpg',
+            drizzle: '/static/weather/images/bg/rain.jpg',
+            thunderstorm: '/static/weather/images/bg/thunderstorm.jpg',
+            snow: '/static/weather/images/bg/snow.jpg',
+            mist: '/static/weather/images/bg/mist.jpg',
+            fog: '/static/weather/images/bg/mist.jpg',
+            haze: '/static/weather/images/bg/mist.jpg',
+        };
+        const bodyBgWeather = document.getElementById('bodyBgWeather');
+        document.querySelectorAll('.weather-card:not([data-error])').forEach(card => {
+            card.addEventListener('mouseenter', () => {
+                const weather = card.dataset.weather;
+                const bg = WEATHER_BACKGROUNDS[weather];
+                if (bg) {
+                    bodyBgWeather.style.backgroundImage = `url('${bg}')`;
+                    bodyBgWeather.style.opacity = '1';
+                }
+            });
+            card.addEventListener('mouseleave', () => {
+                bodyBgWeather.style.opacity = '0';
+            });
+        });
+
+        // Forecast day click
+        document.querySelectorAll('.forecast-day').forEach(day => {
+            day.addEventListener('click', () => {
+                const card = day.closest('.weather-card');
+                card.querySelectorAll('.forecast-day').forEach(d => d.classList.remove('active'));
+                day.classList.add('active');
+
+                document.getElementById('forecastModalIcon').src = day.dataset.icon;
+                document.getElementById('forecastModalDay').textContent = day.dataset.day;
+
+                const hourlyDiv = document.getElementById('forecastModalHourly');
+                hourlyDiv.innerHTML = '';
+                if (day.dataset.hourly) {
+                    try {
+                        const hourly = JSON.parse(day.dataset.hourly);
+                        if (hourly.length > 0) {
+                            let hourlyHtml = '<div class="hourly-label">Hourly</div><div class="hourly-row">';
+                            hourly.forEach(h => {
+                                const tempDisplay = isFahrenheit ? Math.round(h.temp * 9/5 + 32) : h.temp;
+                                hourlyHtml += `<div class="hourly-item"><span class="hourly-time">${h.time}</span><img class="hourly-icon" src="/static/weather/images/icons/${h.icon}" alt=""><span class="hourly-temp">${tempDisplay}°</span></div>`;
+                            });
+                            hourlyHtml += '</div>';
+                            hourlyDiv.innerHTML = hourlyHtml;
+                        }
+                    } catch(e) {}
+                }
+                
+                const statsDiv = document.getElementById('forecastModalStats');
+                statsDiv.innerHTML = '';
+                
+                if (day.dataset.feelsLike) {
+                    const feelsLikeDisplay = isFahrenheit ? Math.round(day.dataset.feelsLike * 9/5 + 32) : day.dataset.feelsLike;
+                    statsDiv.innerHTML += `<div class="forecast-modal-stat"><span>Feels Like</span><span>${feelsLikeDisplay}°${isFahrenheit ? 'F' : 'C'}</span></div>`;
+                }
+                if (day.dataset.windGust) {
+                    const gustDisplay = isFahrenheit ? Math.round(day.dataset.windGust * 0.621371) : day.dataset.windGust;
+                    statsDiv.innerHTML += `<div class="forecast-modal-stat"><span>Wind Gust</span><span>${gustDisplay} ${isFahrenheit ? 'mph' : 'km/h'}</span></div>`;
+                }
+                if (day.dataset.windDeg) {
+                    statsDiv.innerHTML += `<div class="forecast-modal-stat"><span>Wind Direction</span><span>${day.dataset.windDeg}°</span></div>`;
+                }
+                if (day.dataset.pressure) {
+                    statsDiv.innerHTML += `<div class="forecast-modal-stat"><span>Pressure</span><span>${day.dataset.pressure} hPa</span></div>`;
+                }
+                if (day.dataset.clouds) {
+                    statsDiv.innerHTML += `<div class="forecast-modal-stat"><span>Cloudiness</span><span>${day.dataset.clouds}%</span></div>`;
+                }
+                if (day.dataset.sunrise) {
+                    statsDiv.innerHTML += `<div class="forecast-modal-stat"><span>Sunrise</span><span>${day.dataset.sunrise}</span></div>`;
+                }
+                if (day.dataset.sunset) {
+                    statsDiv.innerHTML += `<div class="forecast-modal-stat"><span>Sunset</span><span>${day.dataset.sunset}</span></div>`;
+                }
+                
+                document.getElementById('forecastModal').style.display = 'flex';
+            });
+        });
+
+        // Unit toggle
+        const unitBtn = document.getElementById('unitToggle');
+        let isFahrenheit = localStorage.getItem('unit') === 'F';
+
+        function updateUnits() {
+            document.querySelectorAll('[data-c]').forEach(el => {
+                const c = parseFloat(el.dataset.c);
+                if (isFahrenheit) {
+                    el.textContent = Math.round(c * 9/5 + 32) + '°';
+                } else {
+                    el.textContent = Math.round(c) + '°';
+                }
+            });
+            document.querySelectorAll('[data-wind-c]').forEach(el => {
+                const kmh = parseFloat(el.dataset.windC);
+                const unitSpan = el.querySelector('.wind-unit');
+                if (isFahrenheit) {
+                    el.childNodes[0].textContent = Math.round(kmh * 0.621371) + ' ';
+                    if (unitSpan) unitSpan.textContent = 'mph';
+                } else {
+                    el.childNodes[0].textContent = kmh + ' ';
+                    if (unitSpan) unitSpan.textContent = 'km/h';
+                }
+            });
+            unitBtn.textContent = isFahrenheit ? '°F' : '°C';
+        }
+
+        unitBtn.addEventListener('click', () => {
+            isFahrenheit = !isFahrenheit;
+            localStorage.setItem('unit', isFahrenheit ? 'F' : 'C');
+            updateUnits();
+        });
+        updateUnits();
+
+        // Geolocation
+        {% if not cities %}
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(pos => {
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.action = '/geolocate/';
+                form.innerHTML = `{% csrf_token %}<input type="hidden" name="lat" value="${pos.coords.latitude}"><input type="hidden" name="lon" value="${pos.coords.longitude}">`;
+                document.body.appendChild(form);
+                form.submit();
+            });
+        }
+        {% endif %}
+
+        // === COMPARE CITIES ===
+        let compareSelected = [];
+        
+        function startCompare() {
+            compareSelected = [];
+            document.querySelectorAll('.weather-card:not([data-error])').forEach(card => {
+                card.classList.add('compare-selectable');
+                card.onclick = function(e) {
+                    if (e.target.closest('.card-delete-form') || e.target.closest('.forecast-day') || e.target.closest('.card-refresh-btn') || e.target.closest('.card-delete-btn')) return;
+                    selectForCompare(card);
+                };
+            });
+            document.querySelectorAll('.compare-selectable .card-top').forEach(el => {
+                if (!el.querySelector('.compare-check')) {
+                    const check = document.createElement('span');
+                    check.className = 'compare-check';
+                    check.textContent = '○';
+                    el.appendChild(check);
+                }
+            });
+        }
+
+        function selectForCompare(card) {
+            const city = card.dataset.city;
+            const idx = compareSelected.indexOf(city);
+            if (idx >= 0) {
+                compareSelected.splice(idx, 1);
+                card.classList.remove('compare-selected');
+                const check = card.querySelector('.compare-check');
+                if (check) check.textContent = '○';
+            } else if (compareSelected.length < 2) {
+                compareSelected.push(city);
+                card.classList.add('compare-selected');
+                const check = card.querySelector('.compare-check');
+                if (check) check.textContent = '●';
+            }
+            if (compareSelected.length === 2) {
+                showCompare();
+            }
+        }
+
+        function getCardData(card) {
+            const jsonEl = card.querySelector('.card-compare-data');
+            if (jsonEl) {
+                try { return JSON.parse(jsonEl.textContent); } catch(e) {}
+            }
+            return { city: card.dataset.city };
+        }
+
+        function winner(a, b, field, mode) {
+            if (a[field] === null || a[field] === undefined) return '';
+            if (b[field] === null || b[field] === undefined) return '';
+            if (mode === 'high') return a[field] > b[field] ? 'winner' : a[field] < b[field] ? 'loser' : 'tie';
+            if (mode === 'low') return a[field] < b[field] ? 'winner' : a[field] > b[field] ? 'loser' : 'tie';
+            if (mode === 'comfort21') {
+                const COMFORT = 21;
+                const diffA = Math.abs(a[field] - COMFORT);
+                const diffB = Math.abs(b[field] - COMFORT);
+                return diffA < diffB ? 'winner' : diffA > diffB ? 'loser' : 'tie';
+            }
+            return '';
+        }
+
+        function showCompare() {
+            document.querySelectorAll('.weather-card').forEach(card => {
+                card.classList.remove('compare-selectable', 'compare-selected');
+                card.onclick = null;
+                const check = card.querySelector('.compare-check');
+                if (check) check.remove();
+            });
+
+            const cards = document.querySelectorAll('.weather-card:not([data-error])');
+            const data = [];
+            cards.forEach(card => {
+                if (compareSelected.includes(card.dataset.city)) {
+                    data.push(getCardData(card));
+                }
+            });
+
+            if (data.length === 2) {
+                const [a, b] = data;
+                const fields = [
+                    { key: 'temp', label: 'Temperature', mode: 'comfort21', format: v => isFahrenheit ? Math.round(v * 9/5 + 32) + '°F' : v + '°C' },
+                    { key: 'feels_like', label: 'Feels Like', mode: 'comfort21', format: v => isFahrenheit ? Math.round(v * 9/5 + 32) + '°F' : v + '°C' },
+                    { key: 'humidity', label: 'Humidity', mode: 'low', format: v => v + '%' },
+                    { key: 'wind_speed', label: 'Wind Speed', mode: 'low', format: v => isFahrenheit ? Math.round(v * 0.621371) + ' mph' : v + ' km/h' },
+                    { key: 'visibility', label: 'Visibility', mode: 'high', format: v => v + '%' },
+                    { key: 'pressure', label: 'Pressure', mode: 'low', format: v => v + ' hPa' },
+                    { key: 'clouds', label: 'Cloudiness', mode: 'low', format: v => v + '%' },
+                    { key: 'aqi', label: 'Air Quality', mode: 'low', format: v => v > 0 ? v + '/5' : 'N/A' },
+                ];
+
+                let statsHtml = '';
+                fields.forEach(f => {
+                    const w = f.mode ? winner(a, b, f.key, f.mode) : '';
+                    const aClass = w === 'winner' ? 'compare-win' : w === 'loser' ? 'compare-lose' : '';
+                    const bClass = w === 'winner' ? 'compare-lose' : w === 'loser' ? 'compare-win' : '';
+                    const aVal = a[f.key] || a[f.key] === 0 ? f.format(a[f.key]) : '-';
+                    const bVal = b[f.key] || b[f.key] === 0 ? f.format(b[f.key]) : '-';
+                    statsHtml += `<div class="compare-stat-row"><span class="${aClass}">${aVal}</span><span class="compare-stat-label">${f.label}</span><span class="${bClass}">${bVal}</span></div>`;
+                });
+
+                const iconA = cards[0]?.querySelector('.card-icon')?.src || '';
+                const iconB = cards[0]?.querySelector('.card-icon')?.src || '';
+                const icons = [];
+                cards.forEach(card => { if (compareSelected.includes(card.dataset.city)) icons.push(card.querySelector('.card-icon')?.src || ''); });
+
+                const html = `
+                    <div class="compare-grid">
+                        <div class="compare-city">
+                            <img class="compare-icon" src="${icons[0]}" alt="">
+                            <div class="compare-name">${a.city}</div>
+                            <div class="compare-temp">${isFahrenheit ? Math.round(a.temp * 9/5 + 32) : a.temp}°</div>
+                        </div>
+                        <div class="compare-vs">VS</div>
+                        <div class="compare-city">
+                            <img class="compare-icon" src="${icons[1]}" alt="">
+                            <div class="compare-name">${b.city}</div>
+                            <div class="compare-temp">${isFahrenheit ? Math.round(b.temp * 9/5 + 32) : b.temp}°</div>
+                        </div>
+                    </div>
+                    <div class="compare-stats">${statsHtml}</div>
+                `;
+                document.getElementById('compareContent').innerHTML = html;
+                document.getElementById('compareModal').style.display = 'flex';
+            }
+            compareSelected = [];
+        }
+
+    </script>
+{% endblock %}

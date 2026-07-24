@@ -1,0 +1,124 @@
+{% load static %}
+<div class="weather-card" data-city="{{city.city}}" data-weather="{{city.weather|lower}}"{% if city.error %} data-error="true"{% endif %}>
+    <div class="card-bg"></div>
+    <div class="card-content">
+        {% if city.error %}
+        <div class="card-error">
+            <span>Unable to load weather for {{city.city}}</span>
+            <a href="?refresh={{city.city}}" class="card-retry-btn">Retry</a>
+        </div>
+        {% else %}
+        <div class="card-top">
+            <div class="card-location">
+                <span class="card-city">{{city.city|title}}</span>
+                <span class="card-country">{{city.country}}</span>
+            </div>
+            <div class="card-date">
+                <span class="card-day">{{today}}</span>
+                <span class="card-date-num">{{today_date}}</span>
+                <span class="card-updated" id="updated-{{city.city|slugify}}">Updated {{city.updated_at}}</span>
+            </div>
+            <div class="card-actions">
+                <a href="?refresh={{city.city}}" class="card-action-btn" title="Refresh {{city.city}}">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                    </svg>
+                </a>
+                <form action="delete/" method="POST" class="card-action-form"> {% csrf_token %}
+                    <input type="hidden" name="city_name" value="{{city.city}}" />
+                    <button class="card-action-btn card-action-delete" title="Remove {{city.city}}">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card-main">
+            <div class="card-temp-section">
+                <img class="card-icon" src="{% static "weather/images/icons/"|add:city.icon %}" alt="weather icon">
+                <div>
+                    <div class="card-temp" data-c="{{city.temp}}">{{city.temp}}°</div>
+                    <div class="card-desc">{{city.weather}}</div>
+                </div>
+            </div>
+            <div class="card-stats">
+                <div class="stat">
+                    <span class="stat-label">Humidity</span>
+                    <span class="stat-value">{{city.humidity}}%</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Wind</span>
+                    <span class="stat-value" data-wind-c="{{city.wind_speed}}">{{city.wind_speed}} <span class="wind-unit">km/h</span></span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Visibility</span>
+                    <span class="stat-value">{{city.visibility}}%</span>
+                </div>
+                {% if city.aqi %}
+                <div class="stat">
+                    <span class="stat-label">AQI</span>
+                    <span class="stat-value aqi-badge aqi-{{city.aqi}}">{{city.aqi}}/5</span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="card-forecast">
+            <div class="forecast-day active" 
+                 data-day="Today" 
+                 data-icon="{% static "weather/images/icons/"|add:city.icon %}"
+                 data-max="{{city.temp_max}}" 
+                 data-min="{{city.temp_min}}"
+                 data-feels-like="{{city.feels_like}}"
+                 data-humidity="{{city.humidity}}"
+                 data-wind="{{city.wind_speed}}"
+                 data-wind-gust="{{city.wind_gust}}"
+                 data-wind-deg="{{city.wind_deg}}"
+                 data-pressure="{{city.pressure}}"
+                 data-clouds="{{city.clouds}}"
+                 data-sunrise="{{city.sunrise}}"
+                 data-sunset="{{city.sunset}}"
+                 data-visibility="{{city.visibility}}"
+                 data-weather="{{city.weather}}"
+                 data-hourly="{{city.hourly_today_json}}">
+                <span class="forecast-name">Today</span>
+                <img class="forecast-icon" src="{% static "weather/images/icons/"|add:city.icon %}" alt="">
+                <span class="forecast-temps">
+                    <span class="forecast-max" data-c="{{city.temp}}">{{city.temp}}°</span>
+                    <span class="forecast-min" data-c="{{city.temp}}">{{city.temp}}°</span>
+                </span>
+            </div>
+            {% for day in city.next_3_days %}
+            <div class="forecast-day" 
+                 data-day="{{day.today_short}}" 
+                 data-icon="{% static "weather/images/icons/"|add:day.icon %}"
+                 data-max="{{day.temp_max}}" 
+                 data-min="{{day.temp_min}}"
+                 data-feels-like="{{day.feels_like}}"
+                 data-humidity="{{day.humidity}}"
+                 data-wind="{{day.wind_speed}}"
+                 data-wind-gust="{{day.wind_gust}}"
+                 data-wind-deg="{{day.wind_deg}}"
+                 data-pressure="{{day.pressure}}"
+                 data-clouds="{{day.clouds}}"
+                 data-hourly="{{day.hourly_json}}">
+                <span class="forecast-name">{{day.today_short}}</span>
+                <img class="forecast-icon" src="{% static "weather/images/icons/"|add:day.icon %}" alt="">
+                <span class="forecast-temps">
+                    <span class="forecast-max" data-c="{{day.temp_max}}">{{day.temp_max}}°</span>
+                    <span class="forecast-min" data-c="{{day.temp_min}}">{{day.temp_min}}°</span>
+                </span>
+            </div>
+            {% endfor %}
+        </div>
+
+        <!-- Hidden data for comparison -->
+        <script type="application/json" class="card-compare-data">
+        {"city":"{{city.city|escapejs}}","temp":{{city.temp}},"feels_like":{{city.feels_like}},"humidity":{{city.humidity}},"wind_speed":{{city.wind_speed}},"visibility":{{city.visibility}},"pressure":{{city.pressure}},"clouds":{{city.clouds}},"aqi":{{city.aqi|default:0}}}
+        </script>
+
+        {% endif %}
+    </div>
+</div>
