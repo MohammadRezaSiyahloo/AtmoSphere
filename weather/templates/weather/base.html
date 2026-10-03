@@ -34,6 +34,13 @@
             {% endif %}
         </span>
     </nav>
+    {% if messages %}
+        <div class="app-messages" role="status" aria-live="polite">
+            {% for message in messages %}
+                <p class="app-message {{ message.tags }}">{{ message }}</p>
+            {% endfor %}
+        </div>
+    {% endif %}
     {% block content %}{% endblock %}
 </body>
 </html>

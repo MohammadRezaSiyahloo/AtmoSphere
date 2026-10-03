@@ -932,6 +932,28 @@ body {
 }
 
 /* Error card */
+.app-messages {
+	max-width: 960px;
+	margin: 1rem auto;
+	padding: 0 1rem;
+}
+
+.app-message, .forecast-notice {
+	padding: 0.75rem 1rem;
+	color: rgba(255, 255, 255, 0.85);
+	background: rgba(0, 0, 0, 0.3);
+	border-radius: 8px;
+	font-size: 0.85rem;
+}
+
+.app-message.error {
+	border-left: 3px solid #f87171;
+}
+
+.app-message.warning {
+	border-left: 3px solid #fbbf24;
+}
+
 .card-error {
 	display: flex;
 	align-items: center;

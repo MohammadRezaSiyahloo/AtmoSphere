@@ -113,6 +113,9 @@
             </div>
             {% endfor %}
         </div>
+        {% if city.next_3_days|length < 3 %}
+            <p class="forecast-notice">Some forecast data is unavailable. Current weather is still shown.</p>
+        {% endif %}
 
         <!-- Hidden data for comparison -->
         <script type="application/json" class="card-compare-data">

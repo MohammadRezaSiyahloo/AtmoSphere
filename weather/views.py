@@ -1,24 +1,58 @@
 from django.shortcuts import render, redirect
 from django.urls import reverse_lazy
 from django.utils import timezone
-from django.utils.decorators import method_decorator
-from django.contrib.auth.decorators import login_required
 from django.conf import settings
+from django.contrib import messages
 from django.core.cache import cache
 import requests, datetime, collections, json
 from django.views.generic import View
 
 from .forms import AddCityForm
-from .models import City
+from .cities import get_saved_cities, save_city, delete_city, get_storage_key
 
 
-def get_api_response(url):
+def get_api_response(url, allow_not_found=False):
     try:
         resp = requests.get(url, timeout=5)
         resp.raise_for_status()
         return resp
+    except requests.HTTPError as exc:
+        # Search needs to distinguish an unknown city from an API outage.
+        if allow_not_found and exc.response is not None and exc.response.status_code == 404:
+            return exc.response
+        return None
     except requests.RequestException:
         return None
+
+
+def get_forecast_reports(response):
+    """Keep usable forecast reports; missing optional data must not hide current weather."""
+    if response is None:
+        return []
+    try:
+        payload = response.json()
+    except ValueError:
+        return []
+    reports = payload.get('list', []) if isinstance(payload, dict) else []
+    if not isinstance(reports, list):
+        return []
+    valid_reports = []
+    for report in reports:
+        try:
+            datetime.datetime.strptime(report['dt_txt'], '%Y-%m-%d %H:%M:%S')
+            # These are the fields consumed by the existing forecast processor.
+            for field in ('temp', 'feels_like', 'humidity', 'pressure'):
+                round(report['main'][field])
+            for field in ('speed', 'deg'):
+                round(report['wind'][field])
+            round(report['wind'].get('gust', report['wind']['speed']))
+            round(report['clouds']['all'])
+            if not isinstance(report['weather'][0]['icon'], str):
+                continue
+        except (KeyError, IndexError, TypeError, ValueError, OverflowError):
+            continue
+        valid_reports.append(report)
+    return valid_reports
 
 
 def fetch_city_weather(city, API_key, today):
@@ -31,7 +65,7 @@ def fetch_city_weather(city, API_key, today):
         return {'city': city, 'error': True}
 
     forecast_resp = get_api_response(f'https://api.openweathermap.org/data/2.5/forecast?q={city}&units=metric&cnt=32&appid={API_key}')
-    city_forecast = forecast_resp.json() if forecast_resp else {'list': []}
+    city_forecast = {'list': get_forecast_reports(forecast_resp)}
 
     def get_icon(weather_icon):
         icons = {
@@ -86,6 +120,9 @@ def fetch_city_weather(city, API_key, today):
                     if str(day) in report['dt_txt']:
                         noon_report = report
                         break
+            # Partial forecasts may have no reports for one or more days.
+            if not daily_temps:
+                continue
             day_data = {
                 'today_short': day.strftime('%a'), 'temp_max': max(daily_temps), 'temp_min': min(daily_temps),
                 'icon': get_icon(collections.Counter(daily_icons).most_common(1)[0][0]),
@@ -163,31 +200,33 @@ def fetch_city_weather(city, API_key, today):
     return data
 
 
-@method_decorator(login_required, name='dispatch')
 class IndexView(View):
     def get(self, request):
         today = timezone.localdate(timezone.now())
-        cities = list(City.objects.filter(user=request.user).values_list('name', flat=True))
+        cities = get_saved_cities(request)
+        storage_key = get_storage_key(request)
         refresh_city = request.GET.get('refresh', None)  # city name, 'all', or None
-        refresh_all = refresh_city == 'all'
         cache_ttl = getattr(settings, 'WEATHER_CACHE_TTL', 600)
 
         # Rate limiting for refresh
         if refresh_city:
-            rate_key = f'rate_{request.user.id}'
+            rate_key = f'rate_{storage_key}'
             rate_data = cache.get(rate_key, {'count': 0, 'window_start': timezone.now().isoformat()})
             window_start = datetime.datetime.fromisoformat(rate_data['window_start'])
             if (timezone.now() - window_start).total_seconds() > getattr(settings, 'RATE_LIMIT_WINDOW', 60):
                 rate_data = {'count': 0, 'window_start': timezone.now().isoformat()}
             if rate_data['count'] >= getattr(settings, 'RATE_LIMIT_MAX_REQUESTS', 10):
                 refresh_city = None  # Rate limited
+                messages.warning(request, 'Refresh limit reached. Please wait before refreshing again.')
             else:
                 rate_data['count'] += 1
                 cache.set(rate_key, rate_data, getattr(settings, 'RATE_LIMIT_WINDOW', 60))
 
+        # Derive this only after rate limiting, including the "Refresh All" case.
+        refresh_all = refresh_city == 'all'
         weather_data = []
         for city in cities:
-            cache_key = f'weather_{request.user.id}_{city}'
+            cache_key = f'weather_{storage_key}_{city}'
             needs_refresh = refresh_all or (refresh_city and refresh_city.lower() == city.lower())
             cached = None if needs_refresh else cache.get(cache_key)
             if cached:
@@ -210,25 +249,30 @@ class IndexView(View):
         if form.is_valid():
             API_key = settings.OPENWEATHERMAP_API_KEY
             city = form.cleaned_data.get('city', None)
-            city_weather = get_api_response(f'https://api.openweathermap.org/data/2.5/weather?q={city}&units=metric&appid={API_key}')
+            city_weather = get_api_response(f'https://api.openweathermap.org/data/2.5/weather?q={city}&units=metric&appid={API_key}', allow_not_found=True)
             if city_weather and city_weather.status_code == 200:
-                City.objects.get_or_create(user=request.user, name=city)
+                save_city(request, city)
+            elif city_weather is not None and city_weather.status_code == 404:
+                messages.error(request, 'Location not found. Please check the city name and try again.')
+            else:
+                messages.error(request, 'Weather service is unavailable. Please try again later.')
             return redirect(reverse_lazy('index'))
         else:
+            for errors in form.errors.values():
+                for error in errors:
+                    messages.error(request, error)
             return redirect(reverse_lazy('index'))
 
 
-@method_decorator(login_required, name='dispatch')
 class CityDeleteView(View):
     def post(self, request):
         city_name = request.POST.get('city_name', None)
-        City.objects.filter(user=request.user, name=city_name).delete()
+        delete_city(request, city_name)
         # Clear cache for deleted city
-        cache.delete(f'weather_{request.user.id}_{city_name}')
+        cache.delete(f'weather_{get_storage_key(request)}_{city_name}')
         return redirect(reverse_lazy('index'))
 
 
-@method_decorator(login_required, name='dispatch')
 class GeoLocateView(View):
     def post(self, request):
         lat = request.POST.get('lat')
@@ -237,8 +281,17 @@ class GeoLocateView(View):
             API_key = settings.OPENWEATHERMAP_API_KEY
             resp = get_api_response(f'https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&units=metric&appid={API_key}')
             if resp and resp.status_code == 200:
-                data = resp.json()
-                city_name = data.get('name')
+                try:
+                    data = resp.json()
+                except ValueError:
+                    data = {}
+                city_name = data.get('name') if isinstance(data, dict) else None
                 if city_name:
-                    City.objects.get_or_create(user=request.user, name=city_name)
+                    save_city(request, city_name)
+                else:
+                    messages.error(request, 'Could not identify your location. Please search for a city instead.')
+            else:
+                messages.error(request, 'Weather service is unavailable. Please try again later.')
+        else:
+            messages.error(request, 'Could not identify your location. Please search for a city instead.')
         return redirect(reverse_lazy('index'))
